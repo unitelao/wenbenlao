@@ -4,15 +4,12 @@ const fs = require('fs');
 const Store = require('electron-store');
 const { autoUpdater } = require('electron-updater');
 
-// 初始化存储
 const store = new Store();
 let windows = new Map();
 
-// 配置 autoUpdater 日志（可选）
 autoUpdater.logger = require('electron-log');
 autoUpdater.logger.transports.file.level = 'info';
 
-// 保存所有窗口状态
 function saveWindowsState() {
     const state = [];
     for (let [id, data] of windows.entries()) {
@@ -30,7 +27,6 @@ function saveWindowsState() {
     store.set('windowsState', state);
 }
 
-// 恢复窗口
 function restoreWindows() {
     const saved = store.get('windowsState', []);
     if (saved.length === 0) {
@@ -50,6 +46,7 @@ function restoreWindows() {
 function createWindow(opts = {}) {
     const { bounds, tabs, activeTabId, type } = opts;
     const win = new BrowserWindow({
+        title: 'wenbenLao',
         width: bounds?.width || 1200,
         height: bounds?.height || 800,
         x: bounds?.x,
@@ -110,7 +107,6 @@ function createWindow(opts = {}) {
     return win;
 }
 
-// IPC 处理
 ipcMain.handle('get-window-id', (event) => {
     return event.sender.id;
 });
@@ -237,16 +233,13 @@ ipcMain.handle('save-as', async (event, content) => {
     return null;
 });
 
-// 应用启动
 app.whenReady().then(() => {
     restoreWindows();
-    // 自动更新检查（生产环境且非开发模式）
     if (!process.env.NODE_ENV || process.env.NODE_ENV === 'production') {
         autoUpdater.checkForUpdatesAndNotify();
     }
 });
 
-// 更新事件
 autoUpdater.on('update-available', (info) => {
     console.log('发现新版本:', info.version);
 });
