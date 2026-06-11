@@ -1,5 +1,5 @@
 {
-  "name": "mind-editor",
+  "name": "wenbenlao",
   "version": "1.0.1",
   "description": "Multi-window text editor with mindmap, tab drag & drop",
   "main": "main.js",
@@ -33,26 +33,19 @@
     "wait-on": "^7.0.2"
   },
   "build": {
-    "appId": "com.mindeditor.app",
-    "productName": "MindEditor",
+    "appId": "com.unitelao.wenbenlao",
+    "productName": "wenbenLao",
     "directories": {
       "output": "build"
     },
     "win": {
       "target": "nsis",
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "unitelao",
-        "repo": "wenbenlao",
-        "releaseType": "release"
-      }
-    ]
+    }
   }
 }
