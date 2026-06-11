@@ -1,27 +1,54 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const Store = require('electron-store');
+const { autoUpdater } = require('electron-updater');
 
-// 注意：electron-store 已被注释，窗口状态不会持久化，但程序可以正常运行
-// const Store = require('electron-store');
-// const store = new Store();
+// 初始化存储
+const store = new Store();
+let windows = new Map();
 
-let windows = new Map(); // key: windowId, value: { win, type, tabs, activeTabId, filePath? }
+// 配置 autoUpdater 日志（可选）
+autoUpdater.logger = require('electron-log');
+autoUpdater.logger.transports.file.level = 'info';
 
-// 保存窗口状态（已禁用）
+// 保存所有窗口状态
 function saveWindowsState() {
-    // 由于没有 electron-store，暂时不保存状态
-    // 如需启用，请安装 electron-store 并取消注释
-    return;
+    const state = [];
+    for (let [id, data] of windows.entries()) {
+        const win = data.win;
+        if (!win.isDestroyed()) {
+            state.push({
+                id,
+                bounds: win.getBounds(),
+                tabs: data.tabs,
+                activeTabId: data.activeTabId,
+                type: data.type,
+            });
+        }
+    }
+    store.set('windowsState', state);
 }
 
-// 恢复窗口（总是创建一个新窗口）
+// 恢复窗口
 function restoreWindows() {
-    createWindow(); // 直接创建一个默认窗口
+    const saved = store.get('windowsState', []);
+    if (saved.length === 0) {
+        createWindow();
+    } else {
+        for (const state of saved) {
+            createWindow({
+                bounds: state.bounds,
+                tabs: state.tabs,
+                activeTabId: state.activeTabId,
+                type: state.type,
+            });
+        }
+    }
 }
 
 function createWindow(opts = {}) {
-    const { bounds, tabs, activeTabId } = opts;
+    const { bounds, tabs, activeTabId, type } = opts;
     const win = new BrowserWindow({
         width: bounds?.width || 1200,
         height: bounds?.height || 800,
@@ -44,17 +71,20 @@ function createWindow(opts = {}) {
         content: '',
         filePath: null,
     }];
-    
+
     windows.set(winId, {
         win,
         tabs: initialTabs,
         activeTabId: activeTabId || initialTabs[0].id,
-        type: opts.type || 'main',
+        type: type || 'main',
     });
 
-    win.loadURL(process.env.NODE_ENV === 'development'
-        ? 'http://localhost:5173'
-        : `file://${path.join(__dirname, 'dist/index.html')}`);
+    const isDev = process.env.NODE_ENV === 'development';
+    win.loadURL(
+        isDev
+            ? 'http://localhost:5173'
+            : `file://${path.join(__dirname, 'dist/index.html')}`
+    );
 
     win.once('ready-to-show', () => {
         win.show();
@@ -80,7 +110,7 @@ function createWindow(opts = {}) {
     return win;
 }
 
-// ---------- IPC 处理 ----------
+// IPC 处理
 ipcMain.handle('get-window-id', (event) => {
     return event.sender.id;
 });
@@ -109,7 +139,9 @@ ipcMain.handle('detach-tab', async (event, tabData) => {
     const sourceWinId = event.sender.id;
     const sourceData = windows.get(sourceWinId);
     if (!sourceData) return false;
-    
+
+    const sourceBounds = sourceData.win.getBounds();
+
     const newTabs = sourceData.tabs.filter(t => t.id !== tabData.id);
     let newActiveId = sourceData.activeTabId;
     if (sourceData.activeTabId === tabData.id) {
@@ -118,7 +150,7 @@ ipcMain.handle('detach-tab', async (event, tabData) => {
     sourceData.tabs = newTabs;
     sourceData.activeTabId = newActiveId;
     saveWindowsState();
-    
+
     const sourceWin = sourceData.win;
     if (sourceWin && !sourceWin.isDestroyed()) {
         sourceWin.webContents.send('window-data-updated', {
@@ -126,12 +158,13 @@ ipcMain.handle('detach-tab', async (event, tabData) => {
             activeTabId: newActiveId,
         });
     }
-    
+
     const newWin = createWindow({
+        bounds: sourceBounds,
         tabs: [tabData],
         activeTabId: tabData.id,
     });
-    
+
     return newWin.id;
 });
 
@@ -139,7 +172,7 @@ ipcMain.handle('merge-tab', async (event, { sourceWinId, targetWinId, tabData })
     const sourceData = windows.get(sourceWinId);
     const targetData = windows.get(targetWinId);
     if (!sourceData || !targetData) return false;
-    
+
     const newSourceTabs = sourceData.tabs.filter(t => t.id !== tabData.id);
     let sourceActiveId = sourceData.activeTabId;
     if (sourceData.activeTabId === tabData.id) {
@@ -147,13 +180,13 @@ ipcMain.handle('merge-tab', async (event, { sourceWinId, targetWinId, tabData })
     }
     sourceData.tabs = newSourceTabs;
     sourceData.activeTabId = sourceActiveId;
-    
+
     const newTargetTabs = [...targetData.tabs, tabData];
     targetData.tabs = newTargetTabs;
     targetData.activeTabId = tabData.id;
-    
+
     saveWindowsState();
-    
+
     if (sourceData.win && !sourceData.win.isDestroyed()) {
         sourceData.win.webContents.send('window-data-updated', {
             tabs: newSourceTabs,
@@ -166,7 +199,6 @@ ipcMain.handle('merge-tab', async (event, { sourceWinId, targetWinId, tabData })
             activeTabId: tabData.id,
         });
     }
-    
     return true;
 });
 
@@ -205,8 +237,23 @@ ipcMain.handle('save-as', async (event, content) => {
     return null;
 });
 
+// 应用启动
 app.whenReady().then(() => {
     restoreWindows();
+    // 自动更新检查（生产环境且非开发模式）
+    if (!process.env.NODE_ENV || process.env.NODE_ENV === 'production') {
+        autoUpdater.checkForUpdatesAndNotify();
+    }
+});
+
+// 更新事件
+autoUpdater.on('update-available', (info) => {
+    console.log('发现新版本:', info.version);
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+    console.log('更新已下载，即将安装...');
+    autoUpdater.quitAndInstall();
 });
 
 app.on('window-all-closed', () => {
