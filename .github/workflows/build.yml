@@ -25,12 +25,14 @@ jobs:
         run: npm run build
 
       - name: Package with electron-builder
-        run: npm run dist -- --publish never
+        run: npm run dist
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
 
-      - name: Upload installer as artifact
-        uses: actions/upload-artifact@v4
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v1
         with:
-          name: MindEditor-Setup
-          path: build/*.exe
+          files: build/*.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
