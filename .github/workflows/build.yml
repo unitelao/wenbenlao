@@ -24,13 +24,15 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Package with electron-builder (disable publish)
+      - name: Package with electron-builder (no publish)
         run: npx electron-builder --publish never
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
 
-      - name: Upload installer as artifact
-        uses: actions/upload-artifact@v4
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v1
         with:
-          name: MindEditor-Setup
-          path: build/*.exe
+          files: build/*.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
