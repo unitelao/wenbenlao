@@ -24,8 +24,8 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Package with electron-builder
-        run: npm run dist -- --publish never
+      - name: Package with electron-builder (no publish)
+        run: npx electron-builder --publish never
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
 
