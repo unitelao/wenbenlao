@@ -1,21 +1,51 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Layout, Button } from 'antd';
+import { MenuFoldOutlined, MenuUnfoldOutlined, FileOutlined } from '@ant-design/icons';
 import TabBar from './components/TabBar';
 import TextEditor from './components/TextEditor';
 import MindMap from './components/MindMap';
+import FileTree from './components/FileTree';
 import { message } from 'antd';
+
+const { Sider, Content } = Layout;
 
 const App = () => {
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [windowId, setWindowId] = useState(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const dragSourceRef = useRef(null);
+  const [fileTreeData, setFileTreeData] = useState([]);
+  const [collapsed, setCollapsed] = useState(false);
 
-  // 初始化：从主进程获取窗口数据
+  // 加载文件树
   useEffect(() => {
-    window.electronAPI.getWindowId().then(id => {
-      setWindowId(id);
+    window.electronAPI.getFileTree().then(tree => {
+      if (tree && tree.length) {
+        setFileTreeData(tree);
+      } else {
+        // 初始化示例文档
+        setFileTreeData([{
+          title: '欢迎',
+          key: 'welcome',
+          isLeaf: true,
+          icon: <FileOutlined />,
+          content: '# 欢迎使用 wenbenLao\n\n双击文档节点打开编辑。\n\n你可以右键或点击加号创建文件夹和文档。',
+          type: 'file',
+        }]);
+      }
     });
+  }, []);
+
+  // 保存文件树
+  useEffect(() => {
+    if (isInitialized) {
+      window.electronAPI.saveFileTree(fileTreeData);
+    }
+  }, [fileTreeData, isInitialized]);
+
+  // 窗口初始化
+  useEffect(() => {
+    window.electronAPI.getWindowId().then(id => setWindowId(id));
     window.electronAPI.getWindowData().then(data => {
       if (data) {
         setTabs(data.tabs);
@@ -34,27 +64,98 @@ const App = () => {
     });
   }, []);
 
-  // 自动保存窗口状态到主进程
+  // 保存窗口状态
   useEffect(() => {
     if (!isInitialized) return;
     window.electronAPI.updateWindowData({ tabs, activeTabId });
   }, [tabs, activeTabId, isInitialized]);
 
-  // 添加新标签页
-  const addTab = (type, title = 'Untitled', content = '') => {
+  // 窗口标题显示当前文档名
+  useEffect(() => {
+    const activeTab = tabs.find(t => t.id === activeTabId);
+    if (activeTab) {
+      document.title = `wenbenLao - ${activeTab.title}`;
+    } else {
+      document.title = 'wenbenLao';
+    }
+  }, [activeTabId, tabs]);
+
+  // 从文件树打开文档
+  const openDocumentFromTree = (node) => {
+    const existingTab = tabs.find(t => t.filePath === node.key);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+    } else {
+      const newTab = {
+        id: Date.now(),
+        type: 'text',
+        title: node.title,
+        content: node.content || '',
+        filePath: node.key,
+        isFromTree: true,
+      };
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(newTab.id);
+    }
+  };
+
+  // 重命名时同步标签页标题
+  const handleRenameNode = (nodeKey, newTitle) => {
+    setTabs(prevTabs =>
+      prevTabs.map(tab => {
+        if (tab.filePath === nodeKey) {
+          return { ...tab, title: newTitle };
+        }
+        return tab;
+      })
+    );
+  };
+
+  // 更新文本内容并同步到文件树
+  const updateTabContent = (tabId, newContent) => {
+    setTabs(prev => prev.map(tab =>
+      tab.id === tabId ? { ...tab, content: newContent } : tab
+    ));
+    const tab = tabs.find(t => t.id === tabId);
+    if (tab && tab.filePath && tab.isFromTree) {
+      const updateTree = (nodes) =>
+        nodes.map(node => {
+          if (node.key === tab.filePath) {
+            return { ...node, content: newContent };
+          }
+          if (node.children) node.children = updateTree(node.children);
+          return node;
+        });
+      setFileTreeData(updateTree(fileTreeData));
+    }
+  };
+
+  // 新增文本标签页
+  const addTextTab = () => {
     const newTab = {
       id: Date.now(),
-      type,
-      title,
-      content: type === 'text' ? content : '',
-      nodes: type === 'mindmap' ? [] : undefined,
-      edges: type === 'mindmap' ? [] : undefined,
+      type: 'text',
+      title: 'Untitled',
+      content: '',
+      filePath: null,
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newTab.id);
   };
 
-  // 关闭标签页
+  // 新增思维导图标签页
+  const addMindMapTab = () => {
+    const newTab = {
+      id: Date.now(),
+      type: 'mindmap',
+      title: 'New Mind Map',
+      nodes: [],
+      edges: [],
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+  };
+
   const closeTab = (tabId) => {
     setTabs(prev => {
       const newTabs = prev.filter(t => t.id !== tabId);
@@ -65,23 +166,16 @@ const App = () => {
     });
   };
 
-  // 分离标签页（拖出成独立窗口）
   const detachTab = async (tabId) => {
     const tab = tabs.find(t => t.id === tabId);
     if (!tab) return;
-    // 调用主进程分离
-    const newWindowId = await window.electronAPI.detachTab(tab);
-    if (newWindowId) {
-      // 从当前窗口移除标签页（主进程会更新当前窗口，但为了立即响应，手动移除）
-      setTabs(prev => prev.filter(t => t.id !== tabId));
-      if (activeTabId === tabId) {
-        setActiveTabId(tabs.filter(t => t.id !== tabId)[0]?.id || null);
-      }
-      message.success('已分离到新窗口');
+    await window.electronAPI.detachTab(tab);
+    setTabs(prev => prev.filter(t => t.id !== tabId));
+    if (activeTabId === tabId) {
+      setActiveTabId(tabs.filter(t => t.id !== tabId)[0]?.id || null);
     }
   };
 
-  // 跨窗口合并：当用户将标签页拖到另一个窗口时调用（由 TabBar 组件触发）
   const mergeToWindow = async (tabId, targetWindowId) => {
     const tab = tabs.find(t => t.id === tabId);
     if (!tab) return;
@@ -92,12 +186,6 @@ const App = () => {
     } else {
       message.error('合并失败');
     }
-  };
-
-  const updateTabContent = (tabId, newContent) => {
-    setTabs(prev => prev.map(tab =>
-      tab.id === tabId ? { ...tab, content: newContent } : tab
-    ));
   };
 
   const updateMindMapData = (tabId, nodes, edges) => {
@@ -111,52 +199,77 @@ const App = () => {
   if (!isInitialized) return <div style={{ padding: 20 }}>Loading...</div>;
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <TabBar
-        tabs={tabs}
-        activeId={activeTabId}
-        onSelect={setActiveTabId}
-        onClose={closeTab}
-        onDetach={detachTab}
-        onNewText={() => addTab('text', 'Untitled', '')}
-        onNewMindMap={() => addTab('mindmap', 'New Mind Map', '')}
-        onMergeToWindow={mergeToWindow}
-        windowId={windowId}
-      />
-      <div style={{ flex: 1, overflow: 'auto' }}>
-        {activeTab && activeTab.type === 'text' && (
-          <TextEditor
-            key={activeTab.id}
-            content={activeTab.content || ''}
-            onChange={(val) => updateTabContent(activeTab.id, val)}
-            filePath={activeTab.filePath}
-            onSaveAs={async (content) => {
-              const newPath = await window.electronAPI.saveAs(content);
-              if (newPath) {
-                updateTabContent(activeTab.id, content);
+    <Layout style={{ height: '100vh' }}>
+      <Sider width={250} collapsed={collapsed} theme="light" style={{ background: '#f5f5f5' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: 8 }}>
+          <Button
+            type="text"
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setCollapsed(!collapsed)}
+          />
+        </div>
+        {!collapsed && (
+          <FileTree
+            data={fileTreeData}
+            onDataChange={setFileTreeData}
+            onOpenDocument={openDocumentFromTree}
+            onRename={handleRenameNode}
+          />
+        )}
+      </Sider>
+      <Content style={{ display: 'flex', flexDirection: 'column' }}>
+        <TabBar
+          tabs={tabs}
+          activeId={activeTabId}
+          onSelect={setActiveTabId}
+          onClose={closeTab}
+          onDetach={detachTab}
+          onNewText={addTextTab}
+          onNewMindMap={addMindMapTab}
+          onMergeToWindow={mergeToWindow}
+          windowId={windowId}
+        />
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          {activeTab && activeTab.type === 'text' && (
+            <TextEditor
+              key={activeTab.id}
+              content={activeTab.content || ''}
+              onChange={(val) => updateTabContent(activeTab.id, val)}
+              filePath={activeTab.filePath}
+              onSaveAs={async (content) => {
+                const newPath = await window.electronAPI.saveAs(content);
+                if (newPath) {
+                  const newFileName = newPath.split(/[/\\]/).pop();
+                  updateTabContent(activeTab.id, content);
+                  setTabs(prev => prev.map(tab =>
+                    tab.id === activeTab.id ? { ...tab, filePath: newPath, title: newFileName } : tab
+                  ));
+                  // 可选：将新保存的文件添加到文件树
+                  if (activeTab.filePath === null) {
+                    // 询问是否添加到当前选中的文件夹
+                    message.info('文件已保存，你可以手动在文件树中创建文档并粘贴内容。');
+                  }
+                }
+              }}
+            />
+          )}
+          {activeTab && activeTab.type === 'mindmap' && (
+            <MindMap
+              key={activeTab.id}
+              initialNodes={activeTab.nodes || []}
+              initialEdges={activeTab.edges || []}
+              onChange={(nodes, edges) => updateMindMapData(activeTab.id, nodes, edges)}
+              title={activeTab.title}
+              onTitleChange={(newTitle) => {
                 setTabs(prev => prev.map(tab =>
-                  tab.id === activeTab.id ? { ...tab, filePath: newPath, title: newPath.split(/[/\\]/).pop() } : tab
+                  tab.id === activeTab.id ? { ...tab, title: newTitle } : tab
                 ));
-              }
-            }}
-          />
-        )}
-        {activeTab && activeTab.type === 'mindmap' && (
-          <MindMap
-            key={activeTab.id}
-            initialNodes={activeTab.nodes || []}
-            initialEdges={activeTab.edges || []}
-            onChange={(nodes, edges) => updateMindMapData(activeTab.id, nodes, edges)}
-            title={activeTab.title}
-            onTitleChange={(newTitle) => {
-              setTabs(prev => prev.map(tab =>
-                tab.id === activeTab.id ? { ...tab, title: newTitle } : tab
-              ));
-            }}
-          />
-        )}
-      </div>
-    </div>
+              }}
+            />
+          )}
+        </div>
+      </Content>
+    </Layout>
   );
 };
 
