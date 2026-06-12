@@ -43,6 +43,24 @@ const App = () => {
     }
   }, [fileTreeData, isInitialized]);
 
+  useEffect(() => {
+  window.electronAPI.getFileTree().then(tree => {
+    console.log('加载文件树:', tree);
+    if (tree && tree.length) {
+      setFileTreeData(tree);
+    } else {
+      setFileTreeData([/* 默认欢迎文档 */]);
+    }
+  }).catch(err => console.error('加载失败', err));
+}, []);
+
+useEffect(() => {
+  if (isInitialized) {
+    console.log('保存文件树:', fileTreeData);
+    window.electronAPI.saveFileTree(fileTreeData).catch(err => console.error('保存失败', err));
+  }
+}, [fileTreeData, isInitialized]);
+
   // 窗口初始化
   useEffect(() => {
     window.electronAPI.getWindowId().then(id => setWindowId(id));
