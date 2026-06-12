@@ -1,6 +1,6 @@
 {
   "name": "wenbenlao",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Multi-window text editor with mindmap, tab drag & drop",
   "main": "main.js",
   "scripts": {
