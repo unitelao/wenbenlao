@@ -233,6 +233,15 @@ ipcMain.handle('save-as', async (event, content) => {
     return null;
 });
 
+// 文件树存储
+ipcMain.handle('get-file-tree', () => {
+    const tree = store.get('fileTree', []);
+    return tree;
+});
+
+ipcMain.handle('save-file-tree', (event, tree) => {
+    store.set('fileTree', tree);
+});
 app.whenReady().then(() => {
     restoreWindows();
     if (!process.env.NODE_ENV || process.env.NODE_ENV === 'production') {
