@@ -10,6 +10,58 @@ let windows = new Map();
 autoUpdater.logger = require('electron-log');
 autoUpdater.logger.transports.file.level = 'info';
 
+// ---------- 文件树持久化（独立文件 + store 备份） ----------
+let userDataPath = null;
+let fileTreePath = null;
+
+function initFileTreePaths() {
+    userDataPath = app.getPath('userData');
+    fileTreePath = path.join(userDataPath, 'fileTree.json');
+}
+
+// 保存文件树到磁盘 + store
+function saveFileTreeToDisk(tree) {
+    if (!fileTreePath) initFileTreePaths();
+    try {
+        fs.writeFileSync(fileTreePath, JSON.stringify(tree, null, 2), 'utf-8');
+        store.set('fileTree', tree);
+        return true;
+    } catch (err) {
+        console.error('保存文件树失败', err);
+        return false;
+    }
+}
+
+// 从磁盘或 store 加载文件树（优先磁盘）
+function loadFileTreeFromDisk() {
+    if (!fileTreePath) initFileTreePaths();
+    try {
+        if (fs.existsSync(fileTreePath)) {
+            const data = fs.readFileSync(fileTreePath, 'utf-8');
+            return JSON.parse(data);
+        }
+    } catch (err) {
+        console.error('读取文件树文件失败', err);
+    }
+    // 尝试从旧的 store 迁移
+    const oldTree = store.get('fileTree');
+    if (oldTree && oldTree.length) {
+        saveFileTreeToDisk(oldTree);
+        return oldTree;
+    }
+    // 默认示例文档
+    const defaultTree = [{
+        title: '欢迎',
+        key: 'welcome',
+        isLeaf: true,
+        content: '# 欢迎使用 wenbenLao\n\n双击文档节点打开编辑。\n\n你可以右键或点击加号创建文件夹和文档。',
+        type: 'file',
+    }];
+    saveFileTreeToDisk(defaultTree);
+    return defaultTree;
+}
+
+// ---------- 窗口状态管理 ----------
 function saveWindowsState() {
     const state = [];
     for (let [id, data] of windows.entries()) {
@@ -107,6 +159,7 @@ function createWindow(opts = {}) {
     return win;
 }
 
+// ---------- IPC 处理 ----------
 ipcMain.handle('get-window-id', (event) => {
     return event.sender.id;
 });
@@ -233,16 +286,21 @@ ipcMain.handle('save-as', async (event, content) => {
     return null;
 });
 
-// 文件树存储
+// 文件树存储（使用独立文件，可靠持久化）
 ipcMain.handle('get-file-tree', () => {
-    const tree = store.get('fileTree', []);
-    return tree;
+    return loadFileTreeFromDisk();
 });
 
 ipcMain.handle('save-file-tree', (event, tree) => {
-    store.set('fileTree', tree);
+    return saveFileTreeToDisk(tree);
 });
+
+// ---------- 应用启动 ----------
 app.whenReady().then(() => {
+    // 确保文件树路径已初始化（其实在第一次调用时也会初始化）
+    initFileTreePaths();
+    // 预保存一次默认文件树（如果不存在）
+    loadFileTreeFromDisk();
     restoreWindows();
     if (!process.env.NODE_ENV || process.env.NODE_ENV === 'production') {
         autoUpdater.checkForUpdatesAndNotify();
