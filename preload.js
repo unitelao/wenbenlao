@@ -18,4 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 事件监听
   onInitWindow: (callback) => ipcRenderer.on('init-window', (event, data) => callback(data)),
   onWindowDataUpdated: (callback) => ipcRenderer.on('window-data-updated', (event, data) => callback(data)),
+  
+  // 新增文件树相关
+  getFileTree: () => ipcRenderer.invoke('get-file-tree'),
+  saveFileTree: (tree) => ipcRenderer.invoke('save-file-tree', tree),
 });
