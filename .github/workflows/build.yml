@@ -29,7 +29,14 @@ jobs:
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
 
-      - name: Create Release and Upload Asset
+      - name: Upload installer as artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wenbenLao-Setup
+          path: build/*.exe
+
+      - name: Create Release and Upload Asset (only on tag)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: build/*.exe
